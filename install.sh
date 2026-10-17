@@ -249,7 +249,7 @@ if [ "${DO_UNINSTALL:-}" ]; then
     fi
     pkill -f "$SB_BIN" >/dev/null 2>&1
     rm -rf "$SB_DIR" "$SB_CTL"
-    rm -f /root/vless-url.txt /root/vless-url-warp.txt
+    rm -f ./vless-url.txt ./vless-url-warp.txt
     say "已删除 $SB_DIR 与服务，链接和配置（含 WARP）一起清掉了。"
     say "注: 如果之前在 /etc/rc.local 里写过启动项，需要你自己删掉那一行。"
     exit 0
@@ -814,6 +814,11 @@ WantedBy=multi-user.target
 UNIT_EOF
     systemctl daemon-reload >/dev/null 2>&1
     systemctl enable sing-box >/dev/null 2>&1
+    # 先把可能的旧进程停干净、等一下让端口释放，否则首次启动会 bind 失败，
+    # 表现为退出码 2，systemd 3 秒后才自动重启成功（会误判成"启动失败"）。
+    systemctl stop sing-box >/dev/null 2>&1
+    command -v pkill >/dev/null 2>&1 && pkill -f "$SB_BIN" >/dev/null 2>&1
+    sleep 1
     systemctl restart sing-box >/dev/null 2>&1
     ;;
 openrc)
@@ -860,8 +865,25 @@ RC_EOF
     ;;
 esac
 
-sleep 2
-if pgrep -f "$SB_BIN" >/dev/null 2>&1; then
+# 等它真正起来再判断：systemd 首次启动偶发失败一次后会自动重启（RestartSec=3），
+# 只 sleep 2 秒就检查会卡在重启空档里误报「启动失败」。
+_wait_up() {
+    _n=0
+    while [ "$_n" -lt 15 ]; do
+        if [ "$INIT" = "systemd" ]; then
+            [ "$(systemctl is-active sing-box 2>/dev/null)" = "active" ] && return 0
+        elif [ "$INIT" = "openrc" ]; then
+            rc-service sing-box status >/dev/null 2>&1 && return 0
+        elif command -v pgrep >/dev/null 2>&1; then
+            pgrep -f "$SB_BIN" >/dev/null 2>&1 && return 0
+        fi
+        _n=$((_n + 1))
+        sleep 1
+    done
+    return 1
+}
+
+if _wait_up; then
     ok "sing-box 正在运行（容器重启后会自动拉起）"
 else
     warn "sing-box 似乎没有启动成功，请查看日志"
@@ -879,7 +901,7 @@ VLESS_URL="vless://$UUID@$DOMAIN:$PUBLIC_PORT?encryption=none&security=tls&type=
 URL_FILE="$SB_URL_DIR/vless-direct-$DOMAIN.txt"
 printf '%s\n' "$VLESS_URL" >"$URL_FILE"
 chmod 600 "$URL_FILE"
-ln -sf "$URL_FILE" /root/vless-url.txt
+ln -sf "$URL_FILE" ./vless-url.txt
 
 WARP_URL=""
 URL_FILE_WARP=""
@@ -888,7 +910,7 @@ if [ "$WARP_ON" = "1" ]; then
     URL_FILE_WARP="$SB_URL_DIR/vless-warp-$DOMAIN.txt"
     printf '%s\n' "$WARP_URL" >"$URL_FILE_WARP"
     chmod 600 "$URL_FILE_WARP"
-    ln -sf "$URL_FILE_WARP" /root/vless-url-warp.txt
+    ln -sf "$URL_FILE_WARP" ./vless-url-warp.txt
 fi
 
 printf '%s  %s:%s  %s\n' "$(date '+%F %T')" "$DOMAIN" "$PUBLIC_PORT" "$WS_PATH" >>"$LOG_FILE"
@@ -1008,13 +1030,13 @@ fi
 cat <<EOF
  链接已保存到:
    $URL_FILE
-   /root/vless-url.txt  （软链）
+   ./vless-url.txt  （软链）
 EOF
 
 if [ "$WARP_ON" = "1" ]; then
     cat <<EOF
    $URL_FILE_WARP
-   /root/vless-url-warp.txt  （软链）
+   ./vless-url-warp.txt  （软链）
 EOF
 fi
 
