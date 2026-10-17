@@ -1,0 +1,44 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-direct",
+      "listen": "__LISTEN__",
+      "listen_port": __LISTEN_PORT__,
+      "users": [
+        {
+          "uuid": "__UUID__"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "__DOMAIN__",
+        "certificate_path": "/etc/sing-box/bin/tls.cer",
+        "key_path": "/etc/sing-box/bin/tls.key"
+      },
+      "transport": {
+        "type": "ws",
+        "path": "__WS_PATH__",
+        "headers": {
+          "host": "__DOMAIN__"
+        }
+      }
+    }
+__INBOUNDS_EXTRA__
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+__ENDPOINTS_BLOCK__
+  "route": {
+__RULES_EXTRA__
+    "final": "direct"
+  }
+}
