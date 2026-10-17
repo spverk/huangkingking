@@ -50,6 +50,8 @@ CORE_VERSION=""
 FALLBACK_CORE_VERSION="1.14.3"
 FIREWALL="1"
 FIREWALL_PORTS="80 8080 8880 2052 2082 2086 2095 443 2053 2083 2087 2096 8443"
+# 出网域名解析策略：prefer_ipv6 = 优先 IPv6，没有再回落 IPv4
+DNS_STRATEGY="prefer_ipv6"
 REPO_RAW="https://raw.githubusercontent.com/spverk/huangkingking/main"
 
 # 链路B（套 Cloudflare 出口 = WARP）
@@ -563,6 +565,11 @@ if [ "$WARP_ON" = "1" ]; then
     if [ -f "$WARP_ENC" ]; then
         decrypt "$WARP_ENC" "$WARP_ENVF" >/dev/null 2>&1
         grep -q '^WARP_PRIVATE_KEY=' "$WARP_ENVF" 2>/dev/null || : >"$WARP_ENVF"
+        # 早期版本存在这里的 reserved 是算错的，会让握手被对端丢弃，统一纠正
+        if grep -q '^WARP_RESERVED=' "$WARP_ENVF" 2>/dev/null; then
+            sed 's|^WARP_RESERVED=.*|WARP_RESERVED="0, 0, 0"|' "$WARP_ENVF" >"$WARP_ENVF.fix"
+            mv "$WARP_ENVF.fix" "$WARP_ENVF"
+        fi
         [ -s "$WARP_ENVF" ] && ok "复用上次注册的 WARP 配置"
     fi
 
@@ -594,14 +601,14 @@ if [ "$WARP_ON" = "1" ]; then
         WARP_IF4="$(printf '%s' "$_addrs" | sed -n 's/.*"v4":"\([^"]*\)".*/\1/p')"
         WARP_IF6="$(printf '%s' "$_addrs" | sed -n 's/.*"v6":"\([^"]*\)".*/\1/p')"
         WARP_PEER_PUB="$(printf '%s' "$_resp" | grep -o '"public_key":"[^"]*"' | head -n1 | sed 's/.*:"\(.*\)"/\1/')"
-        _cid="$(printf '%s' "$_resp" | grep -o '"id":"[^"]*"' | head -n1 | sed 's/.*:"\(.*\)"/\1/')"
-        WARP_RESERVED="$(printf '%s' "$_cid" | base64 -d 2>/dev/null | od -An -N3 -tu1 2>/dev/null |
-            tr -s ' ' | sed 's/^ *//;s/ *$//;s/ /, /g')"
+        # reserved 固定 0,0,0：Cloudflare 免费 WARP 接受全零。
+        # 早先试过从注册返回的 id 字段推算前 3 字节，那个值是错的，
+        # 后果是握手包被 Cloudflare 直接丢弃（现象：一直发 handshake initiation、零回应）。
+        WARP_RESERVED="0, 0, 0"
 
         if [ -z "$WARP_IF4" ] || [ -z "$WARP_PEER_PUB" ]; then
             die "WARP 注册返回内容解析失败（Cloudflare 接口格式可能变了）"
         fi
-        [ -n "$WARP_RESERVED" ] || WARP_RESERVED="0, 0, 0"
 
         {
             printf 'WARP_PRIVATE_KEY="%s"\n' "$WARP_PRIVATE_KEY"
@@ -710,6 +717,7 @@ sed -e "s|__LISTEN__|$LISTEN|g" \
     -e "s|__UUID__|$UUID|g" \
     -e "s|__DOMAIN__|$DOMAIN|g" \
     -e "s|__WS_PATH__|$WS_PATH|g" \
+    -e "s|__DNS_STRATEGY__|$DNS_STRATEGY|g" \
     "$TMP_CFG.3" >"$SB_CONF"
 
 if ! "$SB_BIN" check -c "$SB_CONF" >/dev/null 2>&1; then

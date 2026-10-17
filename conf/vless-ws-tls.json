@@ -3,6 +3,14 @@
     "level": "warn",
     "timestamp": true
   },
+  "dns": {
+    "servers": [
+      {
+        "type": "local",
+        "tag": "local"
+      }
+    ]
+  },
   "inbounds": [
     {
       "type": "vless",
@@ -38,6 +46,10 @@ __INBOUNDS_EXTRA__
   ],
 __ENDPOINTS_BLOCK__
   "route": {
+    "default_domain_resolver": {
+      "server": "local",
+      "strategy": "__DNS_STRATEGY__"
+    },
 __RULES_EXTRA__
     "final": "direct"
   }

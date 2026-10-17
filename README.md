@@ -67,7 +67,7 @@ wget -q -O - https://raw.githubusercontent.com/spverk/huangkingking/main/install
 
 - `/etc/sing-box/url/vless-direct-<域名>.txt`
 - `/etc/sing-box/url/vless-warp-<域名>.txt`
-- 软链：`/root/vless-url.txt`、`/root/vless-url-warp.txt`
+- 软链：`./vless-url.txt`、`./vless-url-warp.txt`
 
 ## 装完之后的常用命令
 
