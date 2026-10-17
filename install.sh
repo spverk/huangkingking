@@ -19,7 +19,7 @@
 #    wget -q -O - https://raw.githubusercontent.com/spverk/huangkingking/main/install.sh | sh -s -- --pass 口令
 #
 #  参数:
-#    --pass <口令>         必填，用于解密仓库中加密的 CF 证书
+#    --pass <口令>         必填，解密仓库里加密的 config.conf 与 CF 证书
 #    --domain <域名>       覆盖 config.conf 中的 DOMAIN
 #    --port <端口>         覆盖 config.conf 中的 LISTEN_PORT
 #    --public-port <端口>  覆盖 config.conf 中的 PUBLIC_PORT
@@ -122,7 +122,7 @@ cf-vless 一键安装 (VLESS + WebSocket + TLS + Cloudflare CDN)
   wget -q -O - <仓库 raw 地址>/install.sh | sh -s -- --pass 口令
 
 参数:
-  --pass <口令>         必填，用于解密仓库中加密的 CF 证书
+  --pass <口令>         必填，解密仓库里加密的 config.conf 与 CF 证书
   --domain <域名>       覆盖 config.conf 中的 DOMAIN
   --port <端口>         覆盖 config.conf 中的 LISTEN_PORT
   --public-port <端口>  覆盖 config.conf 中的 PUBLIC_PORT
@@ -359,20 +359,37 @@ dl() {
     wget) wget -q -T 20 -t 2 -O "$2" "$1" ;;
     esac
 }
+# 仓库里的敏感文件（config.conf、证书、私钥）都是加密存放的，统一用这个口令解
+decrypt() {
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -base64 -in "$1" -out "$2" -pass "pass:$PASS" >/dev/null 2>&1
+}
+encrypt() {
+    openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -salt -base64 -in "$1" -out "$2" -pass "pass:$PASS" >/dev/null 2>&1
+}
+
 TMP_DIR="$(mktemp -d)" || die "无法创建临时目录"
 mkdir -p "$SB_DIR/bin" "$SB_CONF_DIR" "$SB_URL_DIR" "$SB_LOG_DIR"
 umask 077
 
 # ----------------------------------------------------------
-# 3. 拉取并按需覆盖 config.conf
+# 3. 拉取并解密 config.conf
+#    仓库里放的是加密后的 config.conf.enc，这样公开仓库里
+#    看不到域名 / UUID / WS 路径，别人也就拼不出能用的链接。
 # ----------------------------------------------------------
 say "读取仓库配置 ..."
-CONF_URL="$REPO_RAW/config.conf"
-dl "$CONF_URL" "$TMP_DIR/config.conf" || die "拉取 config.conf 失败: $CONF_URL"
+[ -n "${A_PASS:-}" ] && PASS="$A_PASS"
+[ -n "${PASS:-}" ] || die "缺少口令参数，正确用法: sh install.sh --pass 你的口令"
+
+CONF_URL="$REPO_RAW/config.conf.enc"
+dl "$CONF_URL" "$TMP_DIR/config.conf.enc" || die "拉取配置失败: $CONF_URL
+（仓库里要有一个 config.conf.enc，是用同口令从 config.conf 加密出来的）"
+decrypt "$TMP_DIR/config.conf.enc" "$TMP_DIR/config.conf" ||
+    die "配置解密失败：口令不对，或系统 openssl 低于 1.1.1"
+rm -f "$TMP_DIR/config.conf.enc"
 # 去掉可能的 Windows 换行符，否则被 . 引号源进来时会把 \r 带进每个变量值
 tr -d '\r' <"$TMP_DIR/config.conf" >"$TMP_DIR/config.lf" || die "处理 config.conf 失败"
 mv "$TMP_DIR/config.lf" "$TMP_DIR/config.conf"
-grep -q '^DOMAIN=' "$TMP_DIR/config.conf" || die "config.conf 内容异常（不是脚本内容？请检查仓库路径）"
+grep -q '^DOMAIN=' "$TMP_DIR/config.conf" || die "解密出来的内容不是本项目的 config.conf（口令错？或仓库里放错了文件）"
 . "$TMP_DIR/config.conf"
 
 # 命令行优先
@@ -385,7 +402,6 @@ grep -q '^DOMAIN=' "$TMP_DIR/config.conf" || die "config.conf 内容异常（不
 [ "$A_PATH" ] && WS_PATH="$A_PATH"
 [ "$A_CORE_VERSION" ] && CORE_VERSION="$A_CORE_VERSION"
 
-[ -n "${PASS:-}" ] || die "缺少口令参数，正确用法: sh install.sh --pass 你的口令"
 [ -n "${DOMAIN:-}" ] || die "config.conf 里没有填 DOMAIN"
 
 if [ -z "${UUID:-}" ]; then
@@ -420,12 +436,6 @@ say "解密 Cloudflare 证书 ..."
 dl "$REPO_RAW/secret/tls.cer.enc" "$TMP_DIR/tls.cer.enc" || die "拉取 secret/tls.cer.enc 失败"
 dl "$REPO_RAW/secret/tls.key.enc" "$TMP_DIR/tls.key.enc" || die "拉取 secret/tls.key.enc 失败"
 
-decrypt() {
-    openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -base64 -in "$1" -out "$2" -pass "pass:$PASS" >/dev/null 2>&1
-}
-encrypt() {
-    openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -salt -base64 -in "$1" -out "$2" -pass "pass:$PASS" >/dev/null 2>&1
-}
 decrypt "$TMP_DIR/tls.cer.enc" "$TMP_DIR/tls.cer" ||
     die "证书解密失败：口令不对，或系统 openssl 版本低于 1.1.1"
 decrypt "$TMP_DIR/tls.key.enc" "$TMP_DIR/tls.key" || die "私钥解密失败：口令不对"

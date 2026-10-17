@@ -1,0 +1,4 @@
+# 只上传加密版；明文的配置和证书留在本地，别提交
+config.conf
+tls.cer
+tls.key
